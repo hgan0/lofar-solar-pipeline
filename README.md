@@ -98,7 +98,7 @@ The orchestration script routes internal container parameters safely to local po
 * Open your browser and navigate to: `http://localhost:9999`
 * If working on a remote cluster via SSH, map the port to your home machine by running this command in a new terminal window:
 ```bash
-ssh -N -f -L 9999:localhost:9999 hgan@zernike.astro.rug.nl
+ssh -N -f -L 9999:localhost:9999 hgan@cluster
 ```
 
 ### :notebook: Interactive Notebook Processing Workflow
