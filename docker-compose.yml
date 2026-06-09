@@ -1,0 +1,37 @@
+services:
+  pipeline:
+    build: .
+    image: lofarsolar-suite:latest
+    volumes:
+      - /net/zernike/scratch3/hgan:/net/zernike/scratch3/hgan
+      - .:/app
+    environment:
+      - ASTROPY_CACHE_DIR=/tmp/astropy_cache
+    # Use custom variables instead of the reserved system UID variable
+    user: "${LOCAL_UID}:${LOCAL_GID}"
+    network_mode: host
+
+  analysis:
+    build: .
+    image: lofarsolar-suite:latest
+    volumes:
+      - /net/zernike/scratch3/hgan:/net/zernike/scratch3/hgan
+      - .:/app
+    ports:
+      - "9999:8888"
+    environment:
+      - ASTROPY_CACHE_DIR=/tmp/astropy_cache
+      - HOME=/tmp
+      - JUPYTER_RUNTIME_DIR=/tmp/jupyter_runtime
+      - JUPYTER_DATA_DIR=/tmp/jupyter_data
+    user: "${LOCAL_UID}:${LOCAL_GID}"
+    # Using an array format guarantees Docker passes arguments cleanly without spacing confusion
+    command:
+      - "/lofar_env/bin/jupyter"
+      - "lab"
+      - "--ip=0.0.0.0"
+      - "--port=8888"
+      - "--no-browser"
+      - "--allow-root"
+      - "--NotebookApp.token="
+      - "--NotebookApp.password="
