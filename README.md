@@ -15,63 +15,65 @@ lofar-solar-pipeline/
 │   ├── cli.py                   # Central Command Line Interface (CLI)
 │   ├── core/                    # The Calibration Pipeline Modules
 │   │   ├── __init__.py
-│   │   ├── step0_preprocess.py  # Data flagging, RFI cleaning, and data selection
-│   │   ├── step1_calibrator.py  # Cross-calibration gain calculations using calibrator sources
-│   │   ├── step2_model_sun.py   # Appending sky-model catalogs and setting solar profiles
-│   │   ├── step3_selfcal.py     # Direction-independent and direction-dependent self-calibration
-│   │   ├── step4_apply.py       # Applying derived solutions to target visibility matrices
-│   │   └── step5_imaging.py     # High-resolution synthesis imaging with WSClean
+│   │   ├── t_dep_step0_all.py   # Step 0: Base data slicing and time window partitioning
+│   │   ├── t_dep_step1_all.py   # Step 1: Solving instrumental gains on calibrator sources
+│   │   ├── t_dep_model_all.py   # Model: Clustering sky components & structuring multi-patch source DBs
+│   │   ├── t_dep_step2_all.py   # Step 2: Cross-application of solutions to target solar fields
+│   │   ├── t_dep_step3_all.py   # Step 3: Iterative phase-only self-cal optimization loops
+│   │   ├── t_dep_apply_all.py   # Step 4: Flare window slicing and asymmetric gain matrix blending
+│   │   └── t_dep_imaging_all.py # Step 5: Final synthesis review imaging via WSClean
 │   └── utils/                   # Analysis & Diagnostics Modules
 │       ├── __init__.py
 │       ├── ephemeris.py         # Custom Astropy patch-coordinate ephemeris calculations
 │       └── diagnostics.py       # Quality metrics tracking (SNR, elevations, uv-coverage)
+├── models/                      # Models for calibration
+│   ├──CasA.sourcedb
+│   └──CasA.txt
 ├── notebooks/                   # Interactive Development Workspace
 │   ├── summary_plots.ipynb
-│   └── interactive_pipeline.ipynb # Granular notebook workflow panel
+│   └── interactive_pipeline.ipynb # Granular notebook workspace orchestrator
 ├── docs/                        # Structural markdown tracking for documentation site
 │   ├── index.md
 │   └── usage.md
 ├── Dockerfile                   # Unified, professional multi-stage environment build
 ├── docker-compose.yml           # Cluster storage volume mapper & runtime controller
 ├── mkdocs.yml                   # Git Page UI layout configuration settings
-├── requirements.txt             # Virtual environment Python package dependencies (astropy, sunpy, jupyter etc)
+├── requirements.txt             # Environment Python packages (astropy, joblib, tqdm, etc.)
 ├── setup.py                     # Package construction and execution script
 └── README.md                    # Landing documentation guide
 ```
 
 ## :gear: Core Pipeline Steps Explained
+The pipeline breaks down long radio interferometry processing scripts into modular, step-by-step parallel executions using `joblib`:
 
-The pipeline breaks down long radio interferometry processing scripts into modular, step-by-step executions:
+### `t_dep_step0_all.py`
+* **Purpose:** Initial data window selection.
+* **Key Actions:** Runs `DP3` to slice short, quiet reference time sections from raw measurement sets (`_uv.MS`) for both the target sun and chosen calibrator.
 
-### `step0_preprocess.py`
-* **Purpose:** Initial data filtering and RFI mitigation.
-* **Key Actions:** Invokes `AOFlagger` to eliminate radio frequency interference from terrestrial signals. Automatically windows specific frequency channel sections or time arrays to isolate optimal visibility structures.
+### `t_dep_step1_all.py`
+* **Purpose:** Establishes instrumental cross-calibration.
+* **Key Actions:** Resolves direction-independent electronic complex gain solutions on a known calibrator dataset (e.g., `CasA`) and exports foundational baseline gain tables using the `DP3` solver.
 
-### `step1_calibrator.py`
-* **Purpose:** Establishes cross-calibration solutions.
-* **Key Actions:** Opens a known calibrator dataset (e.g., CasA, CygA), reads complex voltage correlation states, and writes direction-independent electronic complex gain solutions to sub-table matrices using `DP3`.
+### `t_dep_step2_all.py`
+* **Purpose:** Cross-applies calibration to target fields.
+* **Key Actions:** Cross-applies baseline solutions derived from the calibrator to the target Solar subbands, preparing the initial visibilities for target self-calibration.
 
-### `step2_model_sun.py`
-* **Purpose:** Defines target solar structural parameters.
-* **Key Actions:** Couples standard solar ephemerides with specific position vectors. Maps custom point-source models or Gaussian components into a clean reference sky-model configuration format recognized by `DP3`.
+### `t_dep_model_all.py`
+* **Purpose:** Clusters direction-dependent sky model components.
+* **Key Actions:** Dynamically structures multi-patch component layouts. Invokes `makesourcedb` and `cluster` patches to rename targets (e.g., `Sun`, `CasA`) for direction-dependent calibration.
 
-### `step3_selfcal.py`
-* **Purpose:** Phase and amplitude calibration adjustments.
-* **Key Actions:** Iteratively builds direction-dependent self-calibration adjustments. Corrects phase distortions introduced by volatile Earth ionosphere fluctuations above individual LOFAR array stations.
+### `t_dep_apply_all.py`
+* **Purpose:** Slices solar flare windows and blends gain matrices.
+* **Key Actions:** Extracts active solar flare event windows from raw target data, applies instrumental amplitudes alongside high-cadence self-cal phase adjustments, and outputs blended visibility arrays.
 
-### `step4_apply.py`
-* **Purpose:** Applies full solutions to raw targets.
-* **Key Actions:** Merges prior cross-calibration and solar self-calibration gain tables, directly altering the data columns within your target MeasurementSet (`.MS`) file.
-
-### `step5_imaging.py`
+### `t_dep_imaging_all.py`
 * **Purpose:** Synthesis Imaging.
-* **Key Actions:** Feeds the fully corrected visibility data rows into `WSClean`. Uses Fast Fourier Transforms (FFT) and customized cleaning loops to generate spatial radio maps saved as `.fits` arrays.
-
+* **Key Actions:** Feeds fully corrected visibility rows from different cycles into `WSClean` using customized cleaning loops to generate spatial radio maps saved as `.fits` arrays.
 ---
 
 ## :dart: Quick Start & Installation
 
-Because compiling radio astronomy libraries natively takes hours and often fails due to complex underlying OS library versions, this entire suite runs inside a **Docker Container** configured specifically to preserve user storage permissions on shared cluster drives (like `Zernike`).
+Because compiling radio astronomy libraries natively takes hours and often fails due to complex underlying OS library versions, this entire suite runs inside a **Docker Container** configured specifically to preserve user storage permissions on shared cluster drives (like Zernike).
 
 ### 1. Configure System Environment Identifiers
 To prevent files created by the container from being locked under `root` ownership, export your user ID parameters to your active bash session:
@@ -105,28 +107,41 @@ ssh -N -f -L 9999:localhost:9999 hgan@cluster
 To manipulate datasets, tweak parameters, and selectively activate or deactivate pipeline layers on the fly without using the terminal, create a notebook inside Jupyter Lab and implement this modular execution block:
 
 ```Python
-import os
-import subprocess
-from astropy.io import fits
-import matplotlib.pyplot as plt
+import sys
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
-# 1. Flexible Data Directory Mapping
-DATA_BASE_DIR = "/net/zernike/scratch3/hgan/data/raw_data"
-OBS_DATE      = "2023_09_21"
-MS_NAME       = "L2025887_SAP001_SB119_uv.MS"
+sys.path.append('/app/core')
+import t_dep_step0_all, t_dep_step1_all, t_dep_model_all, t_dep_step2_all, t_dep_step3_all, t_dep_apply_all, t_dep_imaging_all
 
-full_ms_path = os.path.join(DATA_BASE_DIR, OBS_DATE, MS_NAME)
+# Workspace Data Mapping
+RAW_DATA_BASE  = "/net/zernike/scratch3/hgan/data/raw_data"
+PROCESSED_BASE = "/net/zernike/scratch3/hgan/processed"
 
-# 2. Pipeline Execution Toggles (Switch On/Off)
-RUN_SUMMARY = True
-RUN_IMAGER  = False  # Toggle iteratively without resetting previous steps!
+# Run Strategy Configuration
+MODEL_SELECTION    = "CasA+Sun"
+NUM_SELFCAL_ROUNDS = 2
+DIR_NAME_TAG       = "t-dep-selfcal-phase-only-2"
 
-# 3. Running Modules via Compiled Container Binary Bindings
-if RUN_SUMMARY:
-    print(f"=== Invoking DP3 Metadata Analysis ===")
-    cmd = ["DP3", f"msin={full_ms_path}", "msout=.", "steps=[]"]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    print(result.stdout)
+SB_Sun = ['SB009', 'SB029', 'SB049']
+date_set = ["21Sep2023"]; obsvID_set = ["L2025887"]; calibrator_set = ["CasA"]
+
+def run_pipeline_with_progress_telemetry():
+    num_datasets = len(date_set)
+
+    print(" Starting Step 0: Data Slicing...")
+    with tqdm(total=num_datasets, desc="Step 0 Progress") as pbar:
+        Parallel(n_jobs=-1)(delayed(t_dep_step0_all.run_step0)(
+            date_set[k], "10:00:00", "10:05:00", obsvID_set[k], "L2025886",
+            [["Sun", "CasA"]], SB_Sun, SB_Sun, calibrator_set[k],
+            dir_name=DIR_NAME_TAG, raw_data_base=RAW_DATA_BASE, processed_base=PROCESSED_BASE, model_dir_base=""
+        ) for k in range(num_datasets))
+        pbar.update(num_datasets)
+
+    # Additional execution blocks run sequentially with tracking...
+    print("\n Pipeline loop cluster block successfully concluded.")
+
+run_pipeline_with_progress_telemetry()
 ```
 
 ### :triangular_flag_on_post: Clean Shutdown
